@@ -1,0 +1,15 @@
+﻿bin/
+obj/
+.vs/
+*.user
+*.suo
+*.cache
+*.log
+TestResult*/
+work/
+out/
+_decoded/
+*.dds
+*.png
+*.glb
+*.wav

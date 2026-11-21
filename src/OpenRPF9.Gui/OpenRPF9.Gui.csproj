@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+    <ApplicationIcon>..\..\icon.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenRPF9.Core\OpenRPF9.Core.csproj" />
+    <ProjectReference Include="..\OpenRPF9.Decoders\OpenRPF9.Decoders.csproj" />
+    <ProjectReference Include="..\OpenRPF9.Modding\OpenRPF9.Modding.csproj" />
+  </ItemGroup>
+</Project>
