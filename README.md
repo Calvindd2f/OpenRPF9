@@ -4,6 +4,10 @@
 
 A lightweight Windows tool for inspecting and carving data out of Rockstar `RPF9` archives.
 
+<p align="center">
+  <img width="671" height="426" alt="Screenshot 2026-11-22 194706" src="https://github.com/user-attachments/assets/5db3533a-069b-4b8c-815a-8fbe2cd22b69" />
+</p>
+
 ## How it works
 
 Right now, the `RPF9` Table of Contents (TOC) is encrypted, so OpenRPF9 bypasses the directory tree and carves unencrypted payloads directly from the archive:
