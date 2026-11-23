@@ -1,5 +1,8 @@
-﻿namespace OpenRPF9.Core;
-
+using System;
+using System.Collections.Generic;
+using System.IO;
+namespace OpenRPF9.Core
+{
 public sealed class RpfFormatException : Exception
 {
     public RpfFormatException(string message) : base(message) { }
@@ -16,4 +19,5 @@ public sealed class RpfResourceException : Exception
 {
     public RpfResourceException(string message) : base(message) { }
     public RpfResourceException(string message, Exception innerException) : base(message, innerException) { }
+}
 }

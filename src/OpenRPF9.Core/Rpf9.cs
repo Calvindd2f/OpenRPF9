@@ -1,17 +1,20 @@
-﻿namespace OpenRPF9.Core;
-
+using System;
+using System.Collections.Generic;
+using System.IO;
+namespace OpenRPF9.Core
+{
 public sealed class Rpf9HeaderProbe
 {
-    public required uint Magic { get; init; }
-    public required uint Field04 { get; init; }
-    public required uint Field08 { get; init; }
-    public required uint Field0C { get; init; }
-    public required uint Field10 { get; init; }
-    public required uint Field14 { get; init; }
-    public required uint Field18 { get; init; }
-    public required uint Field1C { get; init; }
+    public uint Magic { get; set; }
+    public uint Field04 { get; set; }
+    public uint Field08 { get; set; }
+    public uint Field0C { get; set; }
+    public uint Field10 { get; set; }
+    public uint Field14 { get; set; }
+    public uint Field18 { get; set; }
+    public uint Field1C { get; set; }
 
-    public static Rpf9HeaderProbe Read(ReadOnlySpan<byte> data)
+    public static Rpf9HeaderProbe Read(byte[] data)
     {
         if (data.Length < 32)
             throw new RpfFormatException("RPF9 header too small.");
@@ -34,17 +37,18 @@ public sealed class Rpf9HeaderProbe
 
 public static class Rpf9Scanner
 {
-    public static IReadOnlyList<long> FindZlibStreams(ReadOnlySpan<byte> data)
+    public static System.Collections.Generic.IList<long> FindZlibStreams(byte[] data)
     {
-        var hits = new List<long>();
+        var hits = new System.Collections.Generic.List<long>();
         for (var i = 0; i < data.Length - 1; i++)
         {
             if (data[i] != 0x78)
                 continue;
             var b2 = data[i + 1];
-            if (b2 is 0x01 or 0x5E or 0x9C or 0xDA)
+            if (b2 == 0x01 || b2 == 0x5E || b2 == 0x9C || b2 == 0xDA)
                 hits.Add(i);
         }
         return hits;
     }
+}
 }

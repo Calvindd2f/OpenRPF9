@@ -1,113 +1,69 @@
-﻿using System.Text;
-using OpenRPF9.Core;
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
 
-namespace OpenRPF9.Decoders;
-
-public sealed class TextureDictionaryDecoder : IAssetDecoder
+namespace OpenRPF9.Decoders
 {
-    public bool CanDecode(string name, ReadOnlySpan<byte> data)
+    public sealed class TextureDictionaryDecoder : IAssetDecoder
     {
-        return name.EndsWith(".ytd", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".ytd.rsc", StringComparison.OrdinalIgnoreCase);
-    }
-
-    public DecodedAsset Decode(string name, ReadOnlyMemory<byte> data)
-    {
-        var files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
-        var meta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        public bool CanDecode(string name, byte[] data) { return name.EndsWith(".ytd", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".ytd.full", StringComparison.OrdinalIgnoreCase); }
+        public DecodedAsset Decode(string name, byte[] data)
         {
-            ["decoder"] = "ytd",
-            ["status"] = "scaffold"
-        };
-        var span = data.Span;
-        if (Rsc9Header.TryRead(span, out var header) && header is not null)
-        {
-            meta["rsc9.version"] = header.Version.ToString();
-            meta["rsc9.systemSize"] = header.SystemSize.ToString();
-            meta["rsc9.graphicsSize"] = header.GraphicsSize.ToString();
+            DecodedAsset a = new DecodedAsset();
+            a.SourceName = name; a.Kind = "texture";
+            a.Files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            a.Files[Path.GetFileNameWithoutExtension(name) + ".dds.placeholder"] = Encoding.UTF8.GetBytes("YTD decode scaffold");
+            a.Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            a.Metadata["decoder"] = "ytd"; a.Metadata["status"] = "scaffold"; a.Metadata["bytes"] = data.Length.ToString();
+            return a;
         }
-        files[Path.GetFileName(name) + ".bin"] = data.ToArray();
-        return new DecodedAsset
-        {
-            SourceName = name,
-            Kind = "texture-dictionary",
-            Files = files,
-            Metadata = meta
-        };
-    }
-}
-
-public sealed class DrawableDecoder : IAssetDecoder
-{
-    public bool CanDecode(string name, ReadOnlySpan<byte> data)
-    {
-        return name.EndsWith(".ydr", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".ydd", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".yft", StringComparison.OrdinalIgnoreCase);
     }
 
-    public DecodedAsset Decode(string name, ReadOnlyMemory<byte> data)
+    public sealed class DrawableDecoder : IAssetDecoder
     {
-        var meta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        public bool CanDecode(string name, byte[] data)
         {
-            ["decoder"] = "drawable",
-            ["status"] = "scaffold"
-        };
-        if (Rsc9Header.TryRead(data.Span, out var header) && header is not null)
-        {
-            meta["rsc9.systemSize"] = header.SystemSize.ToString();
-            meta["rsc9.graphicsSize"] = header.GraphicsSize.ToString();
+            string n = name.ToLowerInvariant();
+            return n.EndsWith(".ydr") || n.EndsWith(".ydd") || n.EndsWith(".yft");
         }
-        return new DecodedAsset
+        public DecodedAsset Decode(string name, byte[] data)
         {
-            SourceName = name,
-            Kind = "drawable",
-            Files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
-            {
-                [Path.ChangeExtension(Path.GetFileName(name), ".glb.placeholder")] = Encoding.UTF8.GetBytes("GLB export scaffold")
-            },
-            Metadata = meta
-        };
-    }
-}
-
-public sealed class CollisionDecoder : IAssetDecoder
-{
-    public bool CanDecode(string name, ReadOnlySpan<byte> data)
-    {
-        return name.EndsWith(".ybn", StringComparison.OrdinalIgnoreCase);
+            DecodedAsset a = new DecodedAsset();
+            a.SourceName = name; a.Kind = "geometry";
+            a.Files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            a.Files[Path.GetFileNameWithoutExtension(name) + ".obj.placeholder"] = Encoding.UTF8.GetBytes("Drawable decode scaffold");
+            a.Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            a.Metadata["decoder"] = "drawable"; a.Metadata["status"] = "scaffold"; a.Metadata["bytes"] = data.Length.ToString();
+            return a;
+        }
     }
 
-    public DecodedAsset Decode(string name, ReadOnlyMemory<byte> data)
+    public sealed class BoundsDecoder : IAssetDecoder
     {
-        return new DecodedAsset
+        public bool CanDecode(string name, byte[] data) { return name.EndsWith(".ybn", StringComparison.OrdinalIgnoreCase); }
+        public DecodedAsset Decode(string name, byte[] data)
         {
-            SourceName = name,
-            Kind = "bounds",
-            Files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
-            {
-                [Path.ChangeExtension(Path.GetFileName(name), ".bounds.json")] = Encoding.UTF8.GetBytes("{\"status\":\"scaffold\"}")
-            },
-            Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["decoder"] = "ybn", ["status"] = "scaffold" }
-        };
-    }
-}
-
-public sealed class ClipDictionaryDecoder : IAssetDecoder
-{
-    public bool CanDecode(string name, ReadOnlySpan<byte> data)
-    {
-        return name.EndsWith(".ycd", StringComparison.OrdinalIgnoreCase);
+            DecodedAsset a = new DecodedAsset(); a.SourceName = name; a.Kind = "bounds";
+            a.Files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            a.Files[Path.GetFileNameWithoutExtension(name) + ".bounds.txt"] = Encoding.UTF8.GetBytes("YBN decode scaffold");
+            a.Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            a.Metadata["decoder"] = "ybn"; a.Metadata["status"] = "scaffold";
+            return a;
+        }
     }
 
-    public DecodedAsset Decode(string name, ReadOnlyMemory<byte> data)
+    public sealed class ClothDecoder : IAssetDecoder
     {
-        return new DecodedAsset
+        public bool CanDecode(string name, byte[] data) { return name.EndsWith(".yld", StringComparison.OrdinalIgnoreCase); }
+        public DecodedAsset Decode(string name, byte[] data)
         {
-            SourceName = name,
-            Kind = "clip-dictionary",
-            Files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
-            {
-                [Path.ChangeExtension(Path.GetFileName(name), ".anim.json")] = Encoding.UTF8.GetBytes("{\"status\":\"scaffold\"}")
-            },
-            Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["decoder"] = "ycd", ["status"] = "scaffold" }
-        };
+            DecodedAsset a = new DecodedAsset(); a.SourceName = name; a.Kind = "cloth";
+            a.Files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            a.Files[Path.GetFileNameWithoutExtension(name) + ".cloth.txt"] = Encoding.UTF8.GetBytes("YLD decode scaffold");
+            a.Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            a.Metadata["decoder"] = "yld"; a.Metadata["status"] = "scaffold";
+            return a;
+        }
     }
 }

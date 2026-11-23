@@ -1,5 +1,8 @@
-﻿namespace OpenRPF9.Core;
-
+using System;
+using System.Collections.Generic;
+using System.IO;
+namespace OpenRPF9.Core
+{
 public interface IRpfArchive : IDisposable
 {
     RpfArchiveInfo Info { get; }
@@ -7,4 +10,5 @@ public interface IRpfArchive : IDisposable
     byte[] ReadFile(RpfFileEntry entry);
     void ExtractFile(RpfFileEntry entry, string outputPath);
     IEnumerable<RpfFileEntry> EnumerateFiles();
+}
 }

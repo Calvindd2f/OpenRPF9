@@ -1,21 +1,25 @@
-﻿namespace OpenRPF9.Core;
-
+using System;
+using System.Collections.Generic;
+using System.IO;
+namespace OpenRPF9.Core
+{
 public sealed class RpfHeader
 {
-    public required RpfVersion Version { get; init; }
-    public required uint EntryCount { get; init; }
-    public required uint NamesLength { get; init; }
-    public required RpfEncryption Encryption { get; init; }
-    public uint NameShift { get; init; }
-    public bool HeaderFlag { get; init; }
-    public uint RawFlags { get; init; }
+    public RpfVersion Version { get; set; }
+    public uint EntryCount { get; set; }
+    public uint NamesLength { get; set; }
+    public RpfEncryption Encryption { get; set; }
+    public uint NameShift { get; set; }
+    public bool HeaderFlag { get; set; }
+    public uint RawFlags { get; set; }
 }
 
 public sealed class RpfArchiveInfo
 {
-    public required string Path { get; init; }
-    public required long FileSize { get; init; }
-    public required RpfHeader Header { get; init; }
-    public required RpfDirectoryEntry Root { get; init; }
-    public required IReadOnlyList<RpfEntry> Entries { get; init; }
+    public string Path { get; set; }
+    public long FileSize { get; set; }
+    public RpfHeader Header { get; set; }
+    public RpfDirectoryEntry Root { get; set; }
+    public System.Collections.Generic.IList<RpfEntry> Entries { get; set; }
+}
 }

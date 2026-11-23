@@ -1,12 +1,15 @@
-﻿namespace OpenRPF9.Gui;
+using System;
 
-public static class Program
+namespace OpenRPF9.Gui
 {
-    public static int Main()
+    public static class Program
     {
-        Console.WriteLine("OpenRPF9.Gui scaffold");
-        Console.WriteLine("This target is reserved for a desktop UI. Use OpenRPF9.Cli for archive operations.");
-        Console.WriteLine("Planned features: archive tree, hex/metadata inspector, asset previews, batch export.");
-        return 0;
+        public static int Main()
+        {
+            Console.WriteLine("OpenRPF9.Gui scaffold");
+            Console.WriteLine("This target is reserved for a desktop UI. Use OpenRPF9.Cli for archive operations.");
+            Console.WriteLine("Planned features: archive tree, hex/metadata inspector, asset previews, batch export.");
+            return 0;
+        }
     }
 }

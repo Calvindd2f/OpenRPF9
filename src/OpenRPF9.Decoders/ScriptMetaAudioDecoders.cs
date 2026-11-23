@@ -1,95 +1,76 @@
-﻿using System.Text;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
 using OpenRPF9.Core;
 
-namespace OpenRPF9.Decoders;
-
-public sealed class ScriptDecoder : IAssetDecoder
+namespace OpenRPF9.Decoders
 {
-    public bool CanDecode(string name, ReadOnlySpan<byte> data)
+    public sealed class ScriptDecoder : IAssetDecoder
     {
-        return name.EndsWith(".ysc", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".ysc.full", StringComparison.OrdinalIgnoreCase);
-    }
-
-    public DecodedAsset Decode(string name, ReadOnlyMemory<byte> data)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine("; OpenRPF9 script disassembly scaffold");
-        sb.AppendLine($"; source: {name}");
-        sb.AppendLine($"; size: {data.Length}");
-        if (Rsc9Header.TryRead(data.Span, out var header) && header is not null)
+        public bool CanDecode(string name, byte[] data)
         {
-            sb.AppendLine($"; rsc9.version: {header.Version}");
-            sb.AppendLine($"; rsc9.system: {header.SystemSize}");
-            sb.AppendLine($"; rsc9.graphics: {header.GraphicsSize}");
+            return name.EndsWith(".ysc", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".ysc.full", StringComparison.OrdinalIgnoreCase);
         }
-        return new DecodedAsset
+
+        public DecodedAsset Decode(string name, byte[] data)
         {
-            SourceName = name,
-            Kind = "script",
-            Files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("; OpenRPF9 script disassembly scaffold");
+            sb.AppendLine("; source: " + name);
+            sb.AppendLine("; size: " + data.Length);
+            Rsc9Header header;
+            if (Rsc9Header.TryRead(data, out header) && header != null)
             {
-                [Path.ChangeExtension(Path.GetFileName(name), ".ysc.txt")] = Encoding.UTF8.GetBytes(sb.ToString())
-            },
-            Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["decoder"] = "ysc", ["status"] = "scaffold" }
-        };
-    }
-}
-
-public sealed class MetaDecoder : IAssetDecoder
-{
-    static readonly string[] Extensions = [".ymap", ".ytyp", ".meta", ".rbf", ".pso", ".ymt"]; 
-
-    public bool CanDecode(string name, ReadOnlySpan<byte> data)
-    {
-        foreach (var ext in Extensions)
-        {
-            if (name.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
-                return true;
+                sb.AppendLine("; rsc9.version: " + header.Version);
+                sb.AppendLine("; rsc9.system: " + header.SystemSize);
+                sb.AppendLine("; rsc9.graphics: " + header.GraphicsSize);
+            }
+            DecodedAsset a = new DecodedAsset();
+            a.SourceName = name; a.Kind = "script";
+            a.Files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            a.Files[Path.ChangeExtension(Path.GetFileName(name), ".ysc.txt")] = Encoding.UTF8.GetBytes(sb.ToString());
+            a.Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            a.Metadata["decoder"] = "ysc"; a.Metadata["status"] = "scaffold";
+            return a;
         }
-        return name.EndsWith(".pso", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".ymt", StringComparison.OrdinalIgnoreCase);
     }
 
-    public DecodedAsset Decode(string name, ReadOnlyMemory<byte> data)
+    public sealed class MetaDecoder : IAssetDecoder
     {
-        var xml = $"<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<openrpf9 kind=\"meta\" source=\"{System.Security.SecurityElement.Escape(name)}\" status=\"scaffold\" bytes=\"{data.Length}\" />\n";
-        return new DecodedAsset
+        static readonly string[] Extensions = new string[] { ".ymap", ".ytyp", ".meta", ".rbf", ".pso", ".ymt" };
+
+        public bool CanDecode(string name, byte[] data)
         {
-            SourceName = name,
-            Kind = "meta",
-            Files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
-            {
-                [Path.ChangeExtension(Path.GetFileName(name), ".xml")] = Encoding.UTF8.GetBytes(xml)
-            },
-            Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["decoder"] = "meta", ["status"] = "scaffold" }
-        };
+            for (int i = 0; i < Extensions.Length; i++) if (name.EndsWith(Extensions[i], StringComparison.OrdinalIgnoreCase)) return true;
+            return name.EndsWith(".pso", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".ymt", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public DecodedAsset Decode(string name, byte[] data)
+        {
+            string xml = "<xml version=\"1.0\" encoding=\"utf-8\">\n<openrpf9 kind=\"meta\" source=\"" + System.Security.SecurityElement.Escape(name) + "\" status=\"scaffold\" bytes=\"" + data.Length + "\" />\n";
+            DecodedAsset a = new DecodedAsset();
+            a.SourceName = name; a.Kind = "meta";
+            a.Files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            a.Files[Path.ChangeExtension(Path.GetFileName(name), ".xml")] = Encoding.UTF8.GetBytes(xml);
+            a.Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            a.Metadata["decoder"] = "meta"; a.Metadata["status"] = "scaffold";
+            return a;
+        }
+    }
+
+    public sealed class AudioDecoder : IAssetDecoder
+    {
+        public bool CanDecode(string name, byte[] data) { return name.EndsWith(".awc", StringComparison.OrdinalIgnoreCase); }
+        public DecodedAsset Decode(string name, byte[] data)
+        {
+            DecodedAsset a = new DecodedAsset();
+            a.SourceName = name; a.Kind = "audio";
+            a.Files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            a.Files[Path.ChangeExtension(Path.GetFileName(name), ".wav.placeholder")] = Encoding.UTF8.GetBytes("AWC decode scaffold");
+            a.Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            a.Metadata["decoder"] = "awc"; a.Metadata["status"] = "scaffold"; a.Metadata["bytes"] = data.Length.ToString();
+            return a;
+        }
     }
 }
-
-public sealed class AudioDecoder : IAssetDecoder
-{
-    public bool CanDecode(string name, ReadOnlySpan<byte> data)
-    {
-        return name.EndsWith(".awc", StringComparison.OrdinalIgnoreCase);
-    }
-
-    public DecodedAsset Decode(string name, ReadOnlyMemory<byte> data)
-    {
-        var meta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["decoder"] = "awc",
-            ["status"] = "scaffold",
-            ["bytes"] = data.Length.ToString()
-        };
-        return new DecodedAsset
-        {
-            SourceName = name,
-            Kind = "audio",
-            Files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
-            {
-                [Path.ChangeExtension(Path.GetFileName(name), ".wav.placeholder")] = Encoding.UTF8.GetBytes("AWC decode scaffold")
-            },
-            Metadata = meta
-        };
-    }
-}
-

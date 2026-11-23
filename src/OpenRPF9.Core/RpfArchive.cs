@@ -1,135 +1,123 @@
-﻿using System.IO.MemoryMappedFiles;
-using System.Runtime.InteropServices;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.IO.MemoryMappedFiles;
 
-namespace OpenRPF9.Core;
-
-public sealed class RpfArchive : IRpfArchive
+namespace OpenRPF9.Core
 {
-    readonly MemoryMappedFile _mmf;
-    readonly MemoryMappedViewAccessor _accessor;
-    readonly FileStream _stream;
-    readonly byte[] _keyAes;
-    readonly byte[] _keyNg;
-    bool _disposed;
-
-    public RpfArchiveInfo Info { get; }
-
-    RpfArchive(string path, MemoryMappedFile mmf, MemoryMappedViewAccessor accessor, FileStream stream, RpfArchiveInfo info, byte[] keyAes, byte[] keyNg)
+    public sealed class RpfArchive : IRpfArchive
     {
-        _mmf = mmf;
-        _accessor = accessor;
-        _stream = stream;
-        Info = info;
-        _keyAes = keyAes;
-        _keyNg = keyNg;
-    }
+        private readonly MemoryMappedFile _mmf;
+        private readonly MemoryMappedViewAccessor _accessor;
+        private readonly FileStream _stream;
+        private readonly byte[] _keyAes;
+        private readonly byte[] _keyNg;
+        private bool _disposed;
 
-    public static RpfArchive Open(string path, byte[]? aesKey = null, byte[]? ngKey = null)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-            throw new ArgumentException("Path is required.", nameof(path));
-        var fullPath = Path.GetFullPath(path);
-        var fileInfo = new FileInfo(fullPath);
-        if (!fileInfo.Exists)
-            throw new FileNotFoundException("RPF archive not found.", fullPath);
+        public RpfArchiveInfo Info { get; private set; }
 
-        var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.RandomAccess);
-        var mmf = MemoryMappedFile.CreateFromFile(stream, mapName: null, capacity: 0, MemoryMappedFileAccess.Read, HandleInheritability.None, leaveOpen: true);
-        var accessor = mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
-        try
+        private RpfArchive(string path, MemoryMappedFile mmf, MemoryMappedViewAccessor accessor, FileStream stream, RpfArchiveInfo info, byte[] keyAes, byte[] keyNg)
         {
-            var info = RpfParser.Parse(fullPath, fileInfo.Length, accessor, aesKey ?? [], ngKey ?? []);
-            return new RpfArchive(fullPath, mmf, accessor, stream, info, aesKey ?? [], ngKey ?? []);
+            _mmf = mmf;
+            _accessor = accessor;
+            _stream = stream;
+            Info = info;
+            _keyAes = keyAes;
+            _keyNg = keyNg;
         }
-        catch
+
+        public static RpfArchive Open(string path, byte[] aesKey = null, byte[] ngKey = null)
         {
-            accessor.Dispose();
-            mmf.Dispose();
-            stream.Dispose();
-            throw;
-        }
-    }
+            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Path is required.", "path");
+            string fullPath = Path.GetFullPath(path);
+            FileInfo fileInfo = new FileInfo(fullPath);
+            if (!fileInfo.Exists) throw new FileNotFoundException("RPF archive not found.", fullPath);
 
-    public IEnumerable<RpfFileEntry> EnumerateFiles()
-    {
-        var stack = new Stack<RpfDirectoryEntry>();
-        stack.Push(Info.Root);
-        while (stack.Count > 0)
-        {
-            var dir = stack.Pop();
-            foreach (var file in dir.Files)
-                yield return file;
-            for (var i = dir.Directories.Count - 1; i >= 0; i--)
-                stack.Push(dir.Directories[i]);
-        }
-    }
-
-    public byte[] ReadFile(RpfFileEntry entry)
-    {
-        ArgumentNullException.ThrowIfNull(entry);
-        var data = ReadRaw(entry);
-        return DecodeFileData(entry, data);
-    }
-
-    public Stream OpenRead(RpfFileEntry entry)
-    {
-        return new MemoryStream(ReadFile(entry), writable: false);
-    }
-
-    public void ExtractFile(RpfFileEntry entry, string outputPath)
-    {
-        ArgumentNullException.ThrowIfNull(entry);
-        ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
-        var dir = Path.GetDirectoryName(outputPath);
-        if (!string.IsNullOrEmpty(dir))
-            Directory.CreateDirectory(dir);
-        var data = ReadFile(entry);
-        File.WriteAllBytes(outputPath, data);
-    }
-
-    byte[] ReadRaw(RpfFileEntry entry)
-    {
-        var offset = (long)entry.FileOffset * 512;
-        if (offset < 0 || offset + entry.FileSize > Info.FileSize)
-            throw new RpfFormatException($"File entry '{entry.FullPath}' points outside archive bounds.");
-        var buffer = new byte[entry.FileSize];
-        _accessor.ReadArray(offset, buffer, 0, buffer.Length);
-        return buffer;
-    }
-
-    byte[] DecodeFileData(RpfFileEntry entry, byte[] data)
-    {
-        var decrypted = entry.EncryptionType switch
-        {
-            0 => data,
-            1 when Info.Header.Encryption == RpfEncryption.Aes => RpfCrypto.DecryptAes(data, _keyAes),
-            1 when Info.Header.Encryption == RpfEncryption.Ng => RpfCrypto.DecryptNg(data, entry.Name, entry.FileSize, _keyNg),
-            1 when _keyAes.Length == 32 => RpfCrypto.DecryptAes(data, _keyAes),
-            1 when _keyNg.Length > 0 => RpfCrypto.DecryptNg(data, entry.Name, entry.FileSize, _keyNg),
-            _ => data
-        };
-
-        if (entry.FileUncompressedSize != 0 && entry.FileUncompressedSize != entry.FileSize && decrypted.Length > 0)
-        {
+            FileStream stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.RandomAccess);
+            MemoryMappedFile mmf = MemoryMappedFile.CreateFromFile(stream, null, 0, MemoryMappedFileAccess.Read, HandleInheritability.None, true);
+            MemoryMappedViewAccessor accessor = mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
             try
             {
-                return RpfCompression.Decompress(decrypted, (int)entry.FileUncompressedSize);
+                RpfArchiveInfo info = RpfParser.Parse(fullPath, fileInfo.Length, accessor, (aesKey == null ? new byte[0] : aesKey), (ngKey == null ? new byte[0] : ngKey));
+                return new RpfArchive(fullPath, mmf, accessor, stream, info, (aesKey == null ? new byte[0] : aesKey), (ngKey == null ? new byte[0] : ngKey));
             }
             catch
             {
-                return decrypted;
+                accessor.Dispose();
+                mmf.Dispose();
+                stream.Dispose();
+                throw;
             }
         }
-        return decrypted;
-    }
 
-    public void Dispose()
-    {
-        if (_disposed)
-            return;
-        _disposed = true;
-        _accessor.Dispose();
-        _mmf.Dispose();
-        _stream.Dispose();
+        public IEnumerable<RpfFileEntry> EnumerateFiles()
+        {
+            Stack<RpfDirectoryEntry> stack = new Stack<RpfDirectoryEntry>();
+            stack.Push(Info.Root);
+            while (stack.Count > 0)
+            {
+                RpfDirectoryEntry dir = stack.Pop();
+                foreach (RpfFileEntry file in dir.Files) yield return file;
+                for (int i = dir.Directories.Count - 1; i >= 0; i--) stack.Push(dir.Directories[i]);
+            }
+        }
+
+        public byte[] ReadFile(RpfFileEntry entry)
+        {
+            if (entry == null) throw new ArgumentNullException("entry");
+            byte[] data = ReadRaw(entry);
+            return DecodeFileData(entry, data);
+        }
+
+        public Stream OpenRead(RpfFileEntry entry)
+        {
+            return new MemoryStream(ReadFile(entry), false);
+        }
+
+        public void ExtractFile(RpfFileEntry entry, string outputPath)
+        {
+            if (entry == null) throw new ArgumentNullException("entry");
+            if (string.IsNullOrWhiteSpace(outputPath)) throw new ArgumentException("outputPath");
+            string dir = Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            byte[] data = ReadFile(entry);
+            File.WriteAllBytes(outputPath, data);
+        }
+
+        private byte[] ReadRaw(RpfFileEntry entry)
+        {
+            long offset = (long)entry.FileOffset * 512;
+            if (offset < 0 || offset + entry.FileSize > Info.FileSize)
+                throw new RpfFormatException("File entry '" + entry.FullPath + "' points outside archive bounds.");
+            byte[] buffer = new byte[entry.FileSize];
+            _accessor.ReadArray(offset, buffer, 0, buffer.Length);
+            return buffer;
+        }
+
+        private byte[] DecodeFileData(RpfFileEntry entry, byte[] data)
+        {
+            byte[] decrypted = data;
+            if (entry.EncryptionType == 0) decrypted = data;
+            else if (entry.EncryptionType == 1 && Info.Header.Encryption == RpfEncryption.Aes) decrypted = RpfCrypto.DecryptAes(data, _keyAes);
+            else if (entry.EncryptionType == 1 && Info.Header.Encryption == RpfEncryption.Ng) decrypted = RpfCrypto.DecryptNg(data, entry.Name, entry.FileSize, _keyNg);
+            else if (entry.EncryptionType == 1 && _keyAes.Length == 32) decrypted = RpfCrypto.DecryptAes(data, _keyAes);
+            else if (entry.EncryptionType == 1 && _keyNg.Length > 0) decrypted = RpfCrypto.DecryptNg(data, entry.Name, entry.FileSize, _keyNg);
+
+            if (entry.FileUncompressedSize != 0 && entry.FileUncompressedSize != entry.FileSize && decrypted.Length > 0)
+            {
+                try { return RpfCompression.Decompress(decrypted, (int)entry.FileUncompressedSize); }
+                catch { return decrypted; }
+            }
+            return decrypted;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _accessor.Dispose();
+            _mmf.Dispose();
+            _stream.Dispose();
+        }
     }
 }

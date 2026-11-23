@@ -1,5 +1,8 @@
-﻿namespace OpenRPF9.Core;
-
+using System;
+using System.Collections.Generic;
+using System.IO;
+namespace OpenRPF9.Core
+{
 public enum RpfVersion : uint
 {
     Rpf7 = 0x52504637,
@@ -20,4 +23,5 @@ public enum RpfEntryKind
     Directory,
     BinaryFile,
     ResourceFile
+}
 }

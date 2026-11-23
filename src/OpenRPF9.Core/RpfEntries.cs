@@ -1,28 +1,31 @@
-﻿namespace OpenRPF9.Core;
-
+using System;
+using System.Collections.Generic;
+using System.IO;
+namespace OpenRPF9.Core
+{
 public abstract class RpfEntry
 {
-    public required string Name { get; init; }
-    public required uint NameOffset { get; init; }
-    public required RpfEntryKind Kind { get; init; }
-    public RpfDirectoryEntry? Parent { get; internal set; }
-    public string FullPath => Parent is null || Parent.Parent is null ? Name : string.Concat(Parent.FullPath, "/", Name);
+    public string Name { get; set; }
+    public uint NameOffset { get; set; }
+    public RpfEntryKind Kind { get; set; }
+    public RpfDirectoryEntry Parent { get; internal set; }
+    public string FullPath { get { return Parent == null || Parent.Parent == null ? Name : string.Concat(Parent.FullPath, "/", Name); } }
 }
 
 public sealed class RpfDirectoryEntry : RpfEntry
 {
-    public required uint EntriesIndex { get; init; }
-    public required uint EntriesCount { get; init; }
-    public List<RpfDirectoryEntry> Directories { get; } = [];
-    public List<RpfFileEntry> Files { get; } = [];
+    public uint EntriesIndex { get; set; }
+    public uint EntriesCount { get; set; }
+    public List<RpfDirectoryEntry> Directories { get { return _directories; } } private readonly List<RpfDirectoryEntry> _directories = new System.Collections.Generic.List<RpfDirectoryEntry>();
+    public List<RpfFileEntry> Files { get { return _files; } } private readonly List<RpfFileEntry> _files = new System.Collections.Generic.List<RpfFileEntry>();
 }
 
 public abstract class RpfFileEntry : RpfEntry
 {
-    public required uint FileOffset { get; init; }
-    public required uint FileSize { get; init; }
-    public required uint FileUncompressedSize { get; init; }
-    public required uint EncryptionType { get; init; }
+    public uint FileOffset { get; set; }
+    public uint FileSize { get; set; }
+    public uint FileUncompressedSize { get; set; }
+    public uint EncryptionType { get; set; }
 }
 
 public sealed class RpfBinaryFileEntry : RpfFileEntry
@@ -31,7 +34,8 @@ public sealed class RpfBinaryFileEntry : RpfFileEntry
 
 public sealed class RpfResourceFileEntry : RpfFileEntry
 {
-    public required uint SystemFlags { get; init; }
-    public required uint GraphicsFlags { get; init; }
-    public required ushort Version { get; init; }
+    public uint SystemFlags { get; set; }
+    public uint GraphicsFlags { get; set; }
+    public ushort Version { get; set; }
+}
 }

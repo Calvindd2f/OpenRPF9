@@ -1,17 +1,20 @@
-﻿namespace OpenRPF9.Core;
-
+using System;
+using System.Collections.Generic;
+using System.IO;
+namespace OpenRPF9.Core
+{
 public sealed class Rsc9Header
 {
-    public required uint Magic { get; init; }
-    public required uint Version { get; init; }
-    public required uint SystemFlags { get; init; }
-    public required uint GraphicsFlags { get; init; }
-    public int SystemPageCount => CountPages(SystemFlags);
-    public int GraphicsPageCount => CountPages(GraphicsFlags);
-    public int SystemSize => TotalSize(SystemFlags);
-    public int GraphicsSize => TotalSize(GraphicsFlags);
+    public uint Magic { get; set; }
+    public uint Version { get; set; }
+    public uint SystemFlags { get; set; }
+    public uint GraphicsFlags { get; set; }
+    public int SystemPageCount { get { return CountPages(SystemFlags); } }
+    public int GraphicsPageCount { get { return CountPages(GraphicsFlags); } }
+    public int SystemSize { get { return TotalSize(SystemFlags); } }
+    public int GraphicsSize { get { return TotalSize(GraphicsFlags); } }
 
-    public static bool TryRead(ReadOnlySpan<byte> data, out Rsc9Header? header)
+    public static bool TryRead(byte[] data, out Rsc9Header header)
     {
         header = null;
         if (data.Length < 16)
@@ -67,45 +70,49 @@ public sealed class Rsc9Header
 
 public sealed class Rsc9Resource
 {
-    public required Rsc9Header Header { get; init; }
-    public required byte[] SystemSegment { get; init; }
-    public required byte[] GraphicsSegment { get; init; }
-    public required byte[] Raw { get; init; }
+    public Rsc9Header Header { get; set; }
+    public byte[] SystemSegment { get; set; }
+    public byte[] GraphicsSegment { get; set; }
+    public byte[] Raw { get; set; }
 }
 
 public static class Rsc9Parser
 {
-    public static Rsc9Resource Parse(ReadOnlySpan<byte> data)
+    public static Rsc9Resource Parse(byte[] data)
     {
-        if (!Rsc9Header.TryRead(data, out var header) || header is null)
+        Rsc9Header header; if (!Rsc9Header.TryRead(data, out header) || header == null)
             throw new RpfResourceException("Invalid RSC9 header.");
         var sysSize = Math.Min(header.SystemSize, Math.Max(0, data.Length - 16));
         var gfxSize = Math.Min(header.GraphicsSize, Math.Max(0, data.Length - 16 - sysSize));
-        var sys = data.Slice(16, sysSize).ToArray();
-        var gfx = data.Slice(16 + sysSize, gfxSize).ToArray();
+        byte[] sys = new byte[sysSize]; Array.Copy(data,16,sys,0,sysSize);
+        byte[] gfx = new byte[gfxSize]; Array.Copy(data,16+sysSize,gfx,0,gfxSize);
         ApplyFixups(sys, header.SystemFlags);
         return new Rsc9Resource
         {
             Header = header,
             SystemSegment = sys,
             GraphicsSegment = gfx,
-            Raw = data.ToArray()
+            Raw = data
         };
     }
 
-    static void ApplyFixups(Span<byte> segment, uint flags)
+    static void ApplyFixups(byte[] segment, uint flags)
     {
         if (segment.Length < 8)
             return;
-        for (var i = 0; i + 8 <= segment.Length; i += 8)
+        for (int i = 0; i + 8 <= segment.Length; i += 8)
         {
-            var value = BinaryIO.ReadU64(segment, i);
+            ulong value = BinaryIO.ReadU64(segment, i);
             if ((value & 0xFFFFFFFE00000000UL) == 0x500000000UL)
             {
-                var offset = (int)(value & 0x1FFFFFFFUL);
+                int offset = (int)(value & 0x1FFFFFFFUL);
                 if (offset >= 0 && offset < segment.Length)
-                    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(segment.Slice(i, 8), (ulong)offset);
+                {
+                    byte[] ob = BitConverter.GetBytes((ulong)offset);
+                    Array.Copy(ob, 0, segment, i, 8);
+                }
             }
         }
     }
+}
 }
