@@ -18,6 +18,7 @@ Right now, the `RPF9` Table of Contents (TOC) is encrypted, so OpenRPF9 bypasses
 
 ## Features
 
+- open TTPF files and view textures.
 - a list of carved streams with file offsets, detected type (`text` / `binary`) and decompressed sizes.
 - hex dump and live text/XML preview.
 - export individual streams (`Export Selected`) or dump everything to a folder (`Export All Streams`).
