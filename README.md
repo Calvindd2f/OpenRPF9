@@ -1,6 +1,12 @@
-﻿# OpenRPF9
+<img width="1280" height="424" alt="ascvdvas2" src="https://github.com/user-attachments/assets/5b21323c-885d-40fd-9d46-e2239b715f4e" />
+
+# OpenRPF9
 
 A lightweight Windows tool for inspecting and carving data out of Rockstar `RPF9` archives.
+
+<p align="center">
+  <img width="671" height="426" alt="Screenshot 2026-11-22 194706" src="https://github.com/user-attachments/assets/5db3533a-069b-4b8c-815a-8fbe2cd22b69" />
+</p>
 
 ## How it works
 
