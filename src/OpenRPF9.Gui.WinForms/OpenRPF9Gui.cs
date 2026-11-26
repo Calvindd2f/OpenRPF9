@@ -35,6 +35,7 @@ namespace OpenRPF9
                 }
                 Ffmpeg.Configure(startupSettings.FfmpegPath);
                 if (args != null && args.Length > 1 && string.Equals(args[0], "--scan", StringComparison.OrdinalIgnoreCase)) { ScanCli(args[1]); return 0; }
+                if (args != null && args.Length > 1 && string.Equals(args[0], "--dump-streams", StringComparison.OrdinalIgnoreCase)) { RpfScanner.DumpStreamsCli(args[1]); return 0; }
                 if (args != null && args.Length > 3 && string.Equals(args[0], "--dump-awc-stem", StringComparison.OrdinalIgnoreCase)) { DumpAwcCli(args[1], int.Parse(args[2]), args[3]); return 0; }
                 if (args != null && args.Length > 1 && string.Equals(args[0], "--dump-awc", StringComparison.OrdinalIgnoreCase)) { DumpAwcCli(args[1]); return 0; }
                 if (args != null && args.Length > 2 && string.Equals(args[0], "--extract-awc", StringComparison.OrdinalIgnoreCase)) { int n = AwcExtractTool.Run(args[1], args[2]); Console.WriteLine("extracted=" + n); return 0; }
@@ -2267,27 +2268,150 @@ private void TryLoadModelPreview(FileEntry entry)
             return "Unknown (" + ascii + ")";
         }
 
+        // prints streams so scanner can be diffed for checking if multi-threading is worthwhile.
+        public static void DumpStreamsCli(string path)
+        {
+            using (FileStream fs = new FileStream(Path.GetFullPath(path), FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (System.Security.Cryptography.SHA1 sha = System.Security.Cryptography.SHA1.Create())
+            {
+                int runs = EnvInt("OPENRPF9_DUMP_RUNS", 1);
+                List<CarvedStream> streams = null;
+                Stopwatch sw = new Stopwatch();
+                string times = "";
+                for (int run = 0; run < runs; run++)
+                {
+                    sw.Restart();
+                    streams = FindStreams(fs, CancellationToken.None, null);
+                    sw.Stop();
+                    times += (run == 0 ? "" : ",") + sw.ElapsedMilliseconds;
+                }
+                foreach (CarvedStream s in streams)
+                {
+                    string hash = s.Data == null ? "-" : Convert.ToHexString(sha.ComputeHash(s.Data)).Substring(0, 16);
+                    Console.WriteLine("0x" + s.Offset.ToString("X8") + " consumed=" + s.DecompressedConsumed + " size=" + s.DecompressedSize + " kind=" + s.Kind + " sha1=" + hash);
+                }
+                Console.Error.WriteLine("streams=" + streams.Count + " ms=" + times);
+            }
+        }
+
+        private sealed class ScanProgress
+        {
+            public long Done;
+            public int Found;
+            public long LastReported;
+            public long Total;
+            public Action<long, long, int> Callback;
+            public void Advance(long bytes)
+            {
+                if (bytes <= 0) return;
+                long done = Interlocked.Add(ref Done, bytes);
+                if (Callback == null) return;
+                long last = Interlocked.Read(ref LastReported);
+                if ((done - last >= 8 * 1024 * 1024 || done >= Total) && Interlocked.CompareExchange(ref LastReported, done, last) == last)
+                    Callback(Math.Min(done, Total), Total, Volatile.Read(ref Found));
+            }
+        }
+
+        private sealed class ScanRangeResult
+        {
+            public List<CarvedStream> List = new List<CarvedStream>();
+            public HashSet<long> SkipOffsets = new HashSet<long>();
+            public long CoverEnd;
+            public long StopOffset = -1;
+            public int ZlibAttempts;
+            public int ZlibOk;
+        }
+
+        private static int EnvInt(string name, int fallback)
+        {
+            int v; string s = Environment.GetEnvironmentVariable(name);
+            return !string.IsNullOrEmpty(s) && int.TryParse(s, out v) && v > 0 ? v : fallback;
+        }
+
+        // Scans [0, scanLen) for carvable streams.
         private static List<CarvedStream> FindStreams(FileStream fs, CancellationToken token, Action<long, long, int> progress)
         {
-            List<CarvedStream> list = new System.Collections.Generic.List<CarvedStream>();
-            long len = fs.Length; long scanLen = len; string limEnv = Environment.GetEnvironmentVariable("OPENRPF9_SCAN_MAX"); if (!string.IsNullOrEmpty(limEnv)) { long mb; if (long.TryParse(limEnv, out mb) && mb > 0) scanLen = Math.Min(len, mb * 1024L * 1024L); } AppLog.Line("FindStreams len="+len+" scanLen="+scanLen);
+            long len = fs.Length; long scanLen = len; string limEnv = Environment.GetEnvironmentVariable("OPENRPF9_SCAN_MAX"); if (!string.IsNullOrEmpty(limEnv)) { long mb; if (long.TryParse(limEnv, out mb) && mb > 0) scanLen = Math.Min(len, mb * 1024L * 1024L); }
+            int threads = EnvInt("OPENRPF9_SCAN_THREADS", Environment.ProcessorCount);
+            long chunk = EnvInt("OPENRPF9_SCAN_CHUNK_KB", 0) * 1024L;
+            if (chunk <= 0) chunk = Math.Max(1024 * 1024L, (scanLen + threads * 2L - 1) / (threads * 2L));
+            chunk = AlignUp(chunk, 16);
+            int chunkCount = (int)Math.Max(1, (scanLen + chunk - 1) / chunk);
+            if (threads <= 1) chunkCount = 1;
+            AppLog.Line("FindStreams len=" + len + " scanLen=" + scanLen + " threads=" + threads + " chunks=" + chunkCount);
+
+            ScanProgress prog = new ScanProgress { Total = scanLen, Callback = progress };
+            if (chunkCount == 1)
+            {
+                ScanRangeResult single = ScanRange(fs, 0, scanLen, scanLen, null, token, prog);
+                AppLog.Line("FindStreams zlibAttempts=" + single.ZlibAttempts + " zlibOk=" + single.ZlibOk + " found=" + single.List.Count);
+                return single.List;
+            }
+
+            ScanRangeResult[] results = new ScanRangeResult[chunkCount];
+            string path = fs.Name;
+            System.Threading.Tasks.Parallel.For(0, chunkCount, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = threads }, delegate(int c)
+            {
+                long start = c * chunk, end = Math.Min(scanLen, start + chunk);
+                using (FileStream wfs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    results[c] = ScanRange(wfs, start, end, scanLen, null, token, prog);
+            });
+
+            List<CarvedStream> merged = new List<CarvedStream>();
+            long cursor = 0;
+            int attempts = 0, ok = 0, rescans = 0;
+            for (int c = 0; c < chunkCount; c++)
+            {
+                ScanRangeResult r = results[c];
+                attempts += r.ZlibAttempts; ok += r.ZlibOk;
+                long start = c * chunk, end = Math.Min(scanLen, start + chunk);
+                if (cursor >= end) continue;
+                if (cursor <= start) { merged.AddRange(r.List); cursor = r.CoverEnd; continue; }
+                rescans++;
+                ScanRangeResult fix = ScanRange(fs, cursor, end, scanLen, r.SkipOffsets, token, null);
+                attempts += fix.ZlibAttempts; ok += fix.ZlibOk;
+                merged.AddRange(fix.List);
+                if (fix.StopOffset >= 0)
+                {
+                    foreach (CarvedStream s in r.List) if (s.Offset >= fix.StopOffset) merged.Add(s);
+                    cursor = r.CoverEnd;
+                }
+                else cursor = fix.CoverEnd;
+            }
+            AppLog.Line("FindStreams zlibAttempts=" + attempts + " zlibOk=" + ok + " found=" + merged.Count + " rescans=" + rescans);
+            if (progress != null) progress(scanLen, scanLen, merged.Count);
+            return merged;
+        }
+
+        private static ScanRangeResult ScanRange(FileStream fs, long start, long end, long scanLen, HashSet<long> stopAt, CancellationToken token, ScanProgress prog)
+        {
+            ScanRangeResult result = new ScanRangeResult();
+            List<CarvedStream> list = result.List;
             byte[] buf = new byte[1024 * 1024];
             byte[] tail = new byte[15];
             int tailLen = 0;
-            long pos = 0;
-            long lastProgress = 0;
+            if (start > 0)
+            {
+                byte[] pre = ReadRawBlockStatic(fs, Math.Max(0, start - tail.Length), (int)Math.Min(tail.Length, start));
+                Buffer.BlockCopy(pre, 0, tail, 0, pre.Length); tailLen = pre.Length;
+            }
+            long pos = start;
+            long reportedPos = start;
             int found = 0;
             int zlibAttempts = 0;
             int zlibOk = 0;
-            while (pos < scanLen)
+            while (pos < end)
             {
                 if (token.IsCancellationRequested) break;
+                if (prog != null) { prog.Advance(Math.Min(pos, end) - reportedPos); reportedPos = Math.Min(pos, end); }
                 fs.Position = pos;
                 int want = (int)Math.Min(buf.Length, scanLen - pos);
                 int read = fs.Read(buf, 0, want);
                 if (read <= 0) break;
+                int limit = (int)Math.Min(pos + read < scanLen ? read - 1 : read, end - pos);
+                if (limit <= 0) limit = 1;
 
-                for (int i = 0; i < read; i++)
+                for (int i = 0; i < limit; i++)
                 {
                     long abs = pos + i;
                     byte b = buf[i];
@@ -2297,19 +2421,22 @@ private void TryLoadModelPreview(FileEntry entry)
                         byte b2 = buf[i + 1];
                         if (b2 == 0x01 || b2 == 0x5E || b2 == 0x9C || b2 == 0xDA)
                         {
+                            if (stopAt != null && stopAt.Contains(abs)) { result.StopOffset = abs; break; }
                             zlibAttempts++;
                             CarvedStream s = TryDecompressAt(fs, abs);
                             if (s != null && s.Data != null && s.Data.Length > 0)
                             {
                                 zlibOk++;
                                 list.Add(s);
+                                result.SkipOffsets.Add(abs);
                                 found++;
+                                if (prog != null) Interlocked.Increment(ref prog.Found);
                                 long next = AlignUp(abs + s.DecompressedConsumed, 0x10);
                                 if (next <= abs) next = abs + 1;
                                 if (next > pos + i)
                                 {
                                     long skip = next - (pos + i);
-                                    if (skip < read - i)
+                                    if (skip < limit - i)
                                     {
                                         int target = (int)(i + skip);
                                         i = target - 1;
@@ -2338,6 +2465,7 @@ private void TryLoadModelPreview(FileEntry entry)
                     if ((adat || tada) && ((abs - 3) % 16) == 0)
                     {
                         long hit = abs - 3;
+                        if (stopAt != null && stopAt.Contains(hit)) { result.StopOffset = hit; break; }
                         byte[] block = ReadRawBlockStatic(fs, hit, 1024 * 1024);
                         long declared = ComputeAwcEnd(block, fs.Length - hit);
                         if (declared > 0)
@@ -2354,12 +2482,14 @@ private void TryLoadModelPreview(FileEntry entry)
                             s.Kind = "awc";
                             s.Preview = "AWC " + (adat ? "ADAT" : "TADA") + " " + block.Length + " bytes";
                             list.Add(s);
+                            result.SkipOffsets.Add(hit);
                             found++;
+                            if (prog != null) Interlocked.Increment(ref prog.Found);
                             long awcNext = AlignUp(hit + block.Length, 0x10);
                             if (awcNext > pos + i)
                             {
                                 long awcSkip = awcNext - (pos + i);
-                                if (awcSkip < read - i)
+                                if (awcSkip < limit - i)
                                 {
                                     int target = (int)(i + awcSkip);
                                     i = target - 1;
@@ -2407,6 +2537,7 @@ private void TryLoadModelPreview(FileEntry entry)
                                 s.Preview = MakePreview(document, "text");
                                 list.Add(s);
                                 found++;
+                                if (prog != null) Interlocked.Increment(ref prog.Found);
                             }
                         }
                     }
@@ -2427,6 +2558,7 @@ private void TryLoadModelPreview(FileEntry entry)
                             s.Preview = "BK2 " + block.Length + " bytes";
                             list.Add(s);
                             found++;
+                            if (prog != null) Interlocked.Increment(ref prog.Found);
                         }
                     }
 
@@ -2434,16 +2566,15 @@ private void TryLoadModelPreview(FileEntry entry)
                     else { Array.Copy(tail, 1, tail, 0, 14); tail[14] = b; }
                 }
 
-                pos += read;
-                if (progress != null && (pos - lastProgress >= 8 * 1024 * 1024 || pos >= scanLen))
-                {
-                    lastProgress = pos;
-                    progress(pos, scanLen, found);
-                }
+                if (result.StopOffset >= 0) break;
+                pos += limit;
             nextRead: ;
             }
-            AppLog.Line("FindStreams zlibAttempts=" + zlibAttempts + " zlibOk=" + zlibOk + " found=" + found);
-            return list;
+            if (prog != null && result.StopOffset < 0) prog.Advance(Math.Min(pos, end) - reportedPos);
+            result.CoverEnd = Math.Max(pos, end);
+            result.ZlibAttempts = zlibAttempts;
+            result.ZlibOk = zlibOk;
+            return result;
         }
 
         private static long AlignUp(long value, int align)
